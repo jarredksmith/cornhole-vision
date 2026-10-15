@@ -14,8 +14,8 @@ settings:
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
     CODE_SIGN_STYLE: Automatic
-    # Set your Apple Developer team here or in Xcode > Signing & Capabilities
-    # DEVELOPMENT_TEAM: ABCDE12345
+    DEVELOPMENT_TEAM: SVYYTM3LTN
+    PRODUCT_BUNDLE_IDENTIFIER: com.jarredsmith.cornholevision
 targets:
   CornholeVision:
     type: application
@@ -33,6 +33,7 @@ targets:
       path: CornholeVision/Info.plist
       properties:
         CFBundleDisplayName: Cornhole Vision
+        ITSAppUsesNonExemptEncryption: false
         NSCameraUsageDescription: Cornhole Vision watches the board to score the game automatically.
         NSMotionUsageDescription: Used to notice when the phone is picked up and moved to the other board.
         UILaunchScreen: {}

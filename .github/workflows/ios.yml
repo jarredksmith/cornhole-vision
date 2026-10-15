@@ -1,0 +1,115 @@
+# Builds the Cornhole Vision iPhone app on a GitHub Mac and sends it to TestFlight.
+#
+# Until the App Store Connect key is set up, this only checks that the app compiles
+# and uploads an unsigned IPA. Once these exist in the repo settings, every run is
+# signed and uploaded to TestFlight:
+#   Secrets: ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8 (the full text of the .p8 file)
+# The Apple Team ID isn't secret, so it's set below (TEAM).
+# Signing is automatic: Xcode creates and stores the certificates in your Apple account
+# (cloud-managed signing), so no certificate files live in GitHub.
+name: iPhone app
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ios/**
+      - .github/workflows/ios.yml
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      SIGNING: ${{ secrets.ASC_KEY_P8 != '' && secrets.ASC_KEY_ID != '' && secrets.ASC_ISSUER_ID != '' }}
+      PROJECT: ios/CornholeVision.xcodeproj
+      SCHEME: CornholeVision
+      TEAM: SVYYTM3LTN
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use the newest Xcode 16
+        run: |
+          XC=$(ls -d /Applications/Xcode_16*.app 2>/dev/null | sort -V | tail -1)
+          if [ -n "$XC" ]; then sudo xcode-select -s "$XC/Contents/Developer"; fi
+          xcodebuild -version
+
+      - name: Generate the Xcode project
+        run: |
+          brew install xcodegen
+          cd ios && xcodegen generate
+
+      - name: Check that it compiles (no signing key yet)
+        if: env.SIGNING != 'true'
+        run: |
+          echo "::notice::App Store Connect key not set up yet, so this run only checks the build. See the comments at the top of ios.yml."
+          set -o pipefail
+          xcodebuild -project "$PROJECT" -scheme "$SCHEME" -configuration Release \
+            -destination 'generic/platform=iOS' -derivedDataPath "$RUNNER_TEMP/dd" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build 2>&1 | tee build.log | grep -E "error:|BUILD" || true
+          grep -q "BUILD SUCCEEDED" build.log
+          APP=$(find "$RUNNER_TEMP/dd/Build/Products" -name "CornholeVision.app" -type d | head -1)
+          mkdir -p ipa/Payload && cp -R "$APP" ipa/Payload/ && (cd ipa && zip -qr ../CornholeVision-unsigned.ipa Payload)
+
+      - name: Upload unsigned IPA
+        if: env.SIGNING != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: CornholeVision-unsigned-ipa
+          path: CornholeVision-unsigned.ipa
+          retention-days: 30
+
+      - name: Save the App Store Connect key for Xcode
+        if: env.SIGNING == 'true'
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/keys"
+          printf '%s\n' "$ASC_KEY_P8" > "$RUNNER_TEMP/keys/AuthKey_${ASC_KEY_ID}.p8"
+          chmod 600 "$RUNNER_TEMP/keys/AuthKey_${ASC_KEY_ID}.p8"
+
+      - name: Build for the App Store
+        if: env.SIGNING == 'true'
+        run: |
+          set -o pipefail
+          xcodebuild -project "$PROJECT" -scheme "$SCHEME" -configuration Release \
+            -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/App.xcarchive" \
+            DEVELOPMENT_TEAM="$TEAM" CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
+            CODE_SIGNING_ALLOWED=NO archive 2>&1 | grep -E "error:|warning: .*sign|ARCHIVE|BUILD" || true
+          test -d "$RUNNER_TEMP/App.xcarchive"
+
+      - name: Sign and upload to TestFlight
+        if: env.SIGNING == 'true'
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          set -o pipefail
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>teamID</key><string>${TEAM}</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+            <key>uploadSymbols</key><true/>
+          </dict></plist>
+          PLIST
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/App.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" -exportPath "$RUNNER_TEMP/export" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/keys/AuthKey_${ASC_KEY_ID}.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID" 2>&1 | tail -n 60
+          echo "::notice::Build ${{ github.run_number }} uploaded. It shows up in TestFlight after Apple finishes processing (usually 5 to 15 minutes)."
+
+      - name: Remove the key
+        if: always() && env.SIGNING == 'true'
+        run: rm -rf "$RUNNER_TEMP/keys"
