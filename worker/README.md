@@ -13,13 +13,13 @@ npx wrangler login          # once
 npx wrangler deploy
 ```
 
-Wrangler prints the URL, e.g. `https://cornhole-live.<you>.workers.dev`.
-Put that in `ios/CornholeVision/App/AppConfig.swift` (`syncBaseURL`) and in
-`web/index.html` (`WORKER_URL`).
+Live at `https://cornhole-live.jarredksmith.workers.dev`. The Worker also serves
+`web/index.html` at `/` (Workers static assets), so the follow page and the
+backend share one URL: `https://cornhole-live.jarredksmith.workers.dev/?game=CODE`.
+`ios/CornholeVision/App/AppConfig.swift` points at it already.
 
-Durable Objects need a Workers Paid plan ($5/mo) *or* the free tier with
-SQLite-backed DOs — if `wrangler deploy` complains, change the migration in
-`wrangler.toml` to `new_sqlite_classes = ["GameRoom"]`.
+Durable Objects are SQLite-backed (`new_sqlite_classes`), which works on the
+free plan. Cloudflare's GitHub integration redeploys on every push to `main`.
 
 ## Protocol
 

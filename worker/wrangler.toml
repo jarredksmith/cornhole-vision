@@ -1,6 +1,14 @@
 name = "cornhole-live"
 main = "src/index.js"
 compatibility_date = "2026-01-01"
+account_id = "355038f1e2dc5e821cd70c9a926852c4"
+workers_dev = true
+
+# The follow page (web/index.html) is served by this same Worker at "/".
+# Requests that don't match a file (/ws/..., /api/...) fall through to the Worker.
+[assets]
+directory = "../web"
+not_found_handling = "none"
 
 [[durable_objects.bindings]]
 name = "GAME_ROOM"
@@ -8,4 +16,4 @@ class_name = "GameRoom"
 
 [[migrations]]
 tag = "v1"
-new_classes = ["GameRoom"]
+new_sqlite_classes = ["GameRoom"]

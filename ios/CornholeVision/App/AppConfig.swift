@@ -4,12 +4,12 @@ import Foundation
 enum AppConfig {
     /// Cloudflare Worker base URL, no trailing slash. Leave empty to run fully offline.
     /// Example: "https://cornhole-live.jarred.workers.dev"
-    static let syncBaseURL = ""
+    static let syncBaseURL = "https://cornhole-live.jarredksmith.workers.dev"
 
     /// Where the follow page lives (the web/ folder deployed to Pages / GitHub Pages).
     /// The share sheet sends  <followBaseURL>/?game=CODE
     /// Example: "https://cornhole.jarredsmith.com"
-    static let followBaseURL = ""
+    static let followBaseURL = "https://cornhole-live.jarredksmith.workers.dev"
 
     /// Game to N points (ACL: 21, no bust).
     static let targetScore = 21

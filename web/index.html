@@ -132,11 +132,12 @@
 <script>
 (() => {
   // ---------------------------------------------------------------- config
-  // Set to your deployed worker (see worker/README.md). Leave as-is to run the demo.
-  const WORKER_URL = "";
+  // The Worker serves this page itself, so the backend is this page's own origin.
+  // Override only if you host the page somewhere else (see worker/README.md).
+  const WORKER_URL = location.protocol.startsWith("http") ? location.origin : "https://cornhole-live.jarredksmith.workers.dev";
   const params = new URLSearchParams(location.search);
-  const gameCode = (params.get("game") || "").toUpperCase();
-  const forceDemo = params.get("demo") === "1" || !WORKER_URL || !gameCode;
+  const gameCode = (params.get("game") || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const forceDemo = params.get("demo") === "1" || !gameCode;
 
   // ---------------------------------------------------------------- state
   let state = emptyState();
