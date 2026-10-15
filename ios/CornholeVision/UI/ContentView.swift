@@ -65,7 +65,7 @@ struct StatusBanner: View {
         .padding(.horizontal, 16).padding(.vertical, 10)
         .background(.black.opacity(0.6), in: Capsule())
         .foregroundStyle(.white)
-        .animation(.easeInOut, value: text)
+        .transaction { $0.animation = nil }
     }
 
     private var countdown: Double {
@@ -90,9 +90,7 @@ struct StatusBanner: View {
         switch game.phase {
         case .lobby, .cameraDenied: return ""
         case .findingBoard:
-            return game.candidatePolygon == nil
-                ? "Looking for the board — keep the whole board in view"
-                : "Hold still… locking onto the board"
+            return game.searchMessage
         case .ready:
             if game.liveTracks.isEmpty { return "Board locked — throw!" }
             return "Round \(game.roundNumber): \(game.teams[0].name) \(game.roundA.points) · \(game.teams[1].name) \(game.roundB.points)"

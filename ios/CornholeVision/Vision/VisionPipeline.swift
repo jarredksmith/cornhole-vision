@@ -10,8 +10,10 @@ final class VisionPipeline {
     enum Mode { case idle, calibrating, tracking, paused }
 
     enum Event {
-        case searching(polygon: [CGPoint]?)                    // not locked yet; candidate quad for the overlay
-        case locked(quad: [CGPoint], boardToImage: Homography, modelLoaded: Bool)
+        /// Not locked yet. `polygon` is the leading guess (oriented, hole end first), `hole` is where
+        /// the ML model sees a hole in the image (vnorm), `candidates` how many rectangles were seen.
+        case searching(polygon: [CGPoint]?, hole: CGPoint?, candidates: Int)
+        case locked(BoardLock, modelLoaded: Bool)
         case frame(FrameReport)
         case boardMoved                                        // locked board drifted; re-calibrating
     }
@@ -37,7 +39,9 @@ final class VisionPipeline {
     private let tracker = BagTracker()
 
     private var mode: Mode = .idle
-    private var lock: BoardCalibrator.Lock?
+    private var lock: BoardLock?
+    private var pendingManualCorners: [CGPoint]?
+    private var lastMLHole: (point: CGPoint, frame: Int)?
     private var frameIndex = 0
     private var emptyFrames = 0
     private var driftFrames = 0
@@ -61,11 +65,21 @@ final class VisionPipeline {
         enqueue { p in
             p.mode = .calibrating
             p.lock = nil
+            p.pendingManualCorners = nil
+            p.lastMLHole = nil
             p.calibrator.reset()
             p.colorDetector.resetReference()
             p.tracker.reset()
             p.emptyFrames = 0
             p.driftFrames = 0
+        }
+    }
+
+    /// Lock from four tapped corners (vnorm), hole-end pair first. Applied on the next frame.
+    func lockManually(corners: [CGPoint]) {
+        enqueue { p in
+            p.pendingManualCorners = corners
+            p.mode = .calibrating
         }
     }
 
@@ -110,30 +124,45 @@ final class VisionPipeline {
     }
 
     private func calibrate(_ pb: CVPixelBuffer) {
+        // Manual corners win immediately.
+        if let corners = pendingManualCorners {
+            pendingManualCorners = nil
+            if let lock = calibrator.lockManually(corners: corners, pixelBuffer: pb, warper: warper) {
+                finishLock(lock, pb)
+                return
+            }
+        }
         // Rectangle detection is the expensive part; every other frame is plenty.
         guard frameIndex % 2 == 0 else { return }
-        guard let candidate = detector.detect(in: pb) else {
-            calibrator.reset()
-            emit(.searching(polygon: nil))
+
+        // The ML model is good at spotting the hole even when it can't see the board.
+        if useML, let ml = mlDetector, frameIndex % 4 == 0 {
+            let holes = ml.detect(pb).filter { $0.label == "hole" }
+            if let h = holes.max(by: { $0.confidence < $1.confidence }) {
+                lastMLHole = (CGPoint(x: h.box.midX, y: h.box.midY), frameIndex)
+            }
+        }
+        let mlHole = lastMLHole.flatMap { frameIndex - $0.frame < 30 ? $0.point : nil }
+
+        let candidates = detector.detect(in: pb)
+        if let lock = calibrator.update(candidates: candidates, mlHole: mlHole, pixelBuffer: pb, warper: warper) {
+            finishLock(lock, pb)
             return
         }
-        guard let stable = calibrator.push(candidate.polygon) else {
-            emit(.searching(polygon: candidate.polygon))
-            return
-        }
-        guard let lock = calibrator.resolveOrientation(polygon: stable, pixelBuffer: pb, warper: warper) else {
-            // Stable rectangle but no visible hole: keep showing it, keep trying.
-            emit(.searching(polygon: candidate.polygon))
-            return
-        }
+        emit(.searching(polygon: calibrator.leading?.quad, hole: mlHole, candidates: candidates.count))
+    }
+
+    private func finishLock(_ lock: BoardLock, _ pb: CVPixelBuffer) {
         self.lock = lock
         warper.warp(pixelBuffer: pb, quad: lock.quad)
         colorDetector.captureReference(warper.pixels)
         tracker.reset()
+        tracker.holeCenter = lock.hole.center
+        tracker.holeRadius = lock.hole.radius
         emptyFrames = 0
         driftFrames = 0
         mode = .tracking
-        emit(.locked(quad: lock.quad, boardToImage: lock.boardToImage, modelLoaded: mlDetector != nil))
+        emit(.locked(lock, modelLoaded: mlDetector != nil))
     }
 
     private func track(_ pb: CVPixelBuffer) {
@@ -183,10 +212,15 @@ final class VisionPipeline {
 
         // Every ~2 s check the board hasn't been bumped. Only re-lock when there's
         // nothing on the board, otherwise we'd lose the round.
-        if frameIndex % 60 == 0, let cand = detector.detect(in: pb) {
-            let drift = minDrift(cand.polygon, to: lock.quad)
-            if drift > 0.02 && cand.area > Geometry.polygonArea(lock.quad) * 0.6 { driftFrames += 1 } else { driftFrames = 0 }
-            if driftFrames >= 2 && tracker.confirmed.isEmpty {
+        if !lock.manual, frameIndex % 60 == 0, tracker.confirmed.isEmpty {
+            // The board moved if our locked quad no longer shows the hole (the warper currently
+            // holds this frame's warp of the locked quad) AND a big rectangle sits somewhere else.
+            let holeGone = (warper.findHole()?.contrast ?? 0) < 8
+            let moved = holeGone && detector.detect(in: pb).contains { cand in
+                cand.area > Geometry.polygonArea(lock.quad) * 0.6 && minDrift(cand.polygon, to: lock.quad) > 0.03
+            }
+            driftFrames = moved ? driftFrames + 1 : 0
+            if driftFrames >= 2 {
                 emit(.boardMoved)
                 startCalibration()
                 return

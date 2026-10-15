@@ -32,7 +32,14 @@ final class GameViewModel: ObservableObject {
     @Published var overrides: [Int: BagState] = [:]
     @Published var boardQuad: [CGPoint]? = nil
     @Published var candidatePolygon: [CGPoint]? = nil
+    @Published var candidateHole: CGPoint? = nil          // vnorm, from the ML model while searching
     @Published var boardToImage: Homography? = nil
+    @Published var holeCenter: CGPoint = BoardSpec.holeCenter
+    @Published var holeRadius: Double = BoardSpec.holeRadiusIn
+    @Published var searchMessage = "Looking for the board"
+    @Published var manualCorners: [CGPoint] = []           // vnorm taps collected in manual mode
+    @Published var manualMode = false
+    @Published var searchSeconds = 0.0
     @Published var quietSeconds = 0.0
     @Published var syncStatus: SyncClient.Status = .off
     @Published var fps = 0.0
@@ -58,6 +65,8 @@ final class GameViewModel: ObservableObject {
     private var roundOverTask: Task<Void, Never>?
     private var remoteActiveBoard = 1
     private var sentSetup = false
+    private var searchStarted = Date()
+    private var lastSearchMessageChange = Date.distantPast
 
     init() {
         pipeline.onEvent = { [weak self] event in
@@ -96,6 +105,11 @@ final class GameViewModel: ObservableObject {
         roundActive = false
         sentSetup = false
         teamNamesCustomized = [false, false]
+        manualMode = false
+        manualCorners = []
+        searchStarted = Date()
+        searchSeconds = 0
+        searchMessage = "Looking for the board"
         phase = .findingBoard
         Task {
             do {
@@ -149,12 +163,54 @@ final class GameViewModel: ObservableObject {
     func relockBoard() {
         roundOverTask?.cancel()
         boardQuad = nil
+        candidatePolygon = nil
+        candidateHole = nil
         liveTracks = []
         overrides.removeAll()
         roundActive = false
+        manualCorners = []
+        manualMode = false
+        searchStarted = Date()
+        searchSeconds = 0
+        searchMessage = "Looking for the board"
         camera.unlockFocus()
         phase = .findingBoard
         pipeline.startCalibration()
+    }
+
+    /// Switch to tap-the-corners setup (auto-detect keeps running underneath).
+    func startManualCorners() {
+        guard phase == .findingBoard || boardQuad != nil else { return }
+        if boardQuad != nil { relockBoard() }
+        manualMode = true
+        manualCorners = []
+        searchMessage = "Tap the 2 corners at the HOLE end, then the 2 at the front"
+    }
+
+    func cancelManualCorners() {
+        manualMode = false
+        manualCorners = []
+        searchMessage = "Looking for the board"
+    }
+
+    /// A tap in manual mode; `vnorm` is Vision-normalized (origin bottom-left).
+    func addManualCorner(_ vnorm: CGPoint) {
+        guard manualMode, manualCorners.count < 4 else { return }
+        manualCorners.append(vnorm)
+        switch manualCorners.count {
+        case 1: searchMessage = "Now the other corner at the hole end"
+        case 2: searchMessage = "Now the 2 corners at the front edge"
+        case 3: searchMessage = "Last one"
+        default:
+            searchMessage = "Locking…"
+            pipeline.lockManually(corners: manualCorners)
+        }
+    }
+
+    func undoManualCorner() {
+        guard manualMode, !manualCorners.isEmpty else { return }
+        manualCorners.removeLast()
+        searchMessage = manualCorners.isEmpty ? "Tap the 2 corners at the HOLE end, then the 2 at the front" : "Tap the next corner"
     }
 
     /// Solo mode: the user tapped "Phone is in place" (or motion detected it).
@@ -201,12 +257,28 @@ final class GameViewModel: ObservableObject {
 
     private func handle(_ event: VisionPipeline.Event) {
         switch event {
-        case .searching(let polygon):
+        case .searching(let polygon, let hole, let count):
             candidatePolygon = polygon
-        case .locked(let quad, let h, let model):
-            boardQuad = quad
-            boardToImage = h
+            candidateHole = hole
+            detectionCount = count
+            searchSeconds = Date().timeIntervalSince(searchStarted)
+            if !manualMode, Date().timeIntervalSince(lastSearchMessageChange) > 1.5 {
+                let msg: String
+                if polygon != nil { msg = "Found a board — hold still" }
+                else if hole != nil { msg = "I see the hole — looking for the board's edges" }
+                else if searchSeconds > 8 { msg = "Can't find the board — tap ⋯ → Tap corners" }
+                else { msg = "Looking for the board — keep the whole board in view" }
+                if msg != searchMessage { searchMessage = msg; lastSearchMessageChange = Date() }
+            }
+        case .locked(let lock, let model):
+            boardQuad = lock.quad
+            boardToImage = lock.boardToImage
+            holeCenter = lock.hole.center
+            holeRadius = lock.hole.radius
             candidatePolygon = nil
+            candidateHole = nil
+            manualMode = false
+            manualCorners = []
             modelLoaded = model
             camera.lockFocus()
             roundActive = false
@@ -217,9 +289,11 @@ final class GameViewModel: ObservableObject {
             } else {
                 phase = .ready
             }
-            lastMessage = "Board locked"
+            lastMessage = lock.manual ? "Board set from corners" : String(format: "Board locked (hole at %.0f\", %.0f\")", lock.hole.center.x, lock.hole.center.y)
         case .boardMoved:
             boardQuad = nil
+            searchStarted = Date()
+            searchMessage = "Board moved — looking again"
             if phase == .ready && !roundActive { phase = .findingBoard }
         case .frame(let report):
             handleFrame(report)

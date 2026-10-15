@@ -16,6 +16,11 @@ struct OverlayView: View {
         let liveTracks = game.liveTracks
         let overrides = game.overrides
         let teams = game.teams
+        let holeCenter = game.holeCenter
+        let holeRadius = game.holeRadius
+        let candidateHole = game.candidateHole
+        let manualCorners = game.manualCorners
+        let manualMode = game.manualMode
         return GeometryReader { _ in
             Canvas { ctx, _ in
                 guard let layer = previewLayer else { return }
@@ -27,13 +32,38 @@ struct OverlayView: View {
                     return pt(h.apply(inches))
                 }
 
-                // Candidate rectangle while locking
-                if let poly = candidatePolygon, boardQuad == nil {
+                // Candidate rectangle while locking (hole end drawn heavier)
+                if let poly = candidatePolygon, boardQuad == nil, !manualMode {
                     var path = Path()
                     path.move(to: pt(poly[0]))
                     for p in poly.dropFirst() { path.addLine(to: pt(p)) }
                     path.closeSubpath()
                     ctx.stroke(path, with: .color(.yellow.opacity(0.9)), style: StrokeStyle(lineWidth: 3, dash: [10, 8]))
+                    var back = Path(); back.move(to: pt(poly[0])); back.addLine(to: pt(poly[1]))
+                    ctx.stroke(back, with: .color(.yellow), lineWidth: 6)
+                }
+                // Where the model thinks the hole is
+                if let h = candidateHole, boardQuad == nil {
+                    let c = pt(h)
+                    let rect = CGRect(x: c.x - 14, y: c.y - 14, width: 28, height: 28)
+                    ctx.stroke(Path(ellipseIn: rect), with: .color(.cyan.opacity(0.9)), style: StrokeStyle(lineWidth: 2, dash: [5, 4]))
+                }
+                // Manual corner taps
+                if manualMode {
+                    for (i, c) in manualCorners.enumerated() {
+                        let p = pt(c)
+                        let rect = CGRect(x: p.x - 13, y: p.y - 13, width: 26, height: 26)
+                        ctx.fill(Path(ellipseIn: rect), with: .color(i < 2 ? .orange : .yellow))
+                        ctx.stroke(Path(ellipseIn: rect), with: .color(.white), lineWidth: 2)
+                        ctx.draw(Text("\(i + 1)").font(.system(size: 14, weight: .black)).foregroundStyle(.black), at: p)
+                    }
+                    if manualCorners.count >= 2 {
+                        var path = Path()
+                        path.move(to: pt(manualCorners[0]))
+                        for c in manualCorners.dropFirst() { path.addLine(to: pt(c)) }
+                        if manualCorners.count == 4 { path.closeSubpath() }
+                        ctx.stroke(path, with: .color(.yellow.opacity(0.8)), style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
+                    }
                 }
 
                 // Locked board + hole
@@ -48,8 +78,8 @@ struct OverlayView: View {
                     let steps = 24
                     for i in 0...steps {
                         let t = Double(i) / Double(steps) * 2 * .pi
-                        let p = CGPoint(x: BoardSpec.holeCenter.x + BoardSpec.holeRadiusIn * cos(t),
-                                        y: BoardSpec.holeCenter.y + BoardSpec.holeRadiusIn * sin(t))
+                        let p = CGPoint(x: holeCenter.x + holeRadius * cos(t),
+                                        y: holeCenter.y + holeRadius * sin(t))
                         if let q = boardPt(p) {
                             if i == 0 { hole.move(to: q) } else { hole.addLine(to: q) }
                         }
@@ -92,7 +122,14 @@ struct OverlayView: View {
     }
 
     @MainActor private func tap(at location: CGPoint) {
-        guard let layer = game.previewLayer, let h = game.boardToImage else { return }
+        guard let layer = game.previewLayer else { return }
+        if game.manualMode {
+            // Layer point -> capture-device point (top-left origin) -> Vision (bottom-left origin)
+            let dp = layer.captureDevicePointConverted(fromLayerPoint: location)
+            game.addManualCorner(CGPoint(x: dp.x, y: 1 - dp.y))
+            return
+        }
+        guard let h = game.boardToImage else { return }
         var best: Int?
         var bestD = 40.0
         for t in game.liveTracks {

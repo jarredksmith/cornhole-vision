@@ -44,6 +44,10 @@ final class BagTracker {
     var occludedKeepFrames = 90
     var minHitsToConfirm = 3
 
+    /// Measured at lock time (regulation: (12, 9), r = 3).
+    var holeCenter = BoardSpec.holeCenter
+    var holeRadius = BoardSpec.holeRadiusIn
+
     func reset() { tracks.removeAll(); frame = 0 }
 
     /// Remove resolved/finished tracks between rounds.
@@ -102,13 +106,13 @@ final class BagTracker {
                 t.state = .lost
                 t.resolvedAtFrame = frame
             } else if t.missed >= framesToResolve && t.resolvedAtFrame == nil {
-                let dHole = BoardSpec.distanceToHole(t.position)
+                let dHole = Double(hypot(t.position.x - holeCenter.x, t.position.y - holeCenter.y))
                 let dEdge = BoardSpec.distanceToEdge(t.position)
                 // Where was it heading? Extrapolate half a bag length.
                 let ahead = CGPoint(x: t.position.x + t.velocity.x * 2, y: t.position.y + t.velocity.y * 2)
-                let aheadHole = BoardSpec.distanceToHole(ahead)
-                if dHole < BoardSpec.holeRadiusIn + 2.0 || aheadHole < BoardSpec.holeRadiusIn + 0.5
-                    || (t.inHoleHint && dHole < BoardSpec.holeRadiusIn + 4.0) {
+                let aheadHole = Double(hypot(ahead.x - holeCenter.x, ahead.y - holeCenter.y))
+                if dHole < holeRadius + 2.0 || aheadHole < holeRadius + 0.5
+                    || (t.inHoleHint && dHole < holeRadius + 4.0) {
                     t.state = .inHole
                     t.resolvedAtFrame = frame
                 } else if dEdge < 2.5 || !BoardSpec.isInsideBoard(ahead) {

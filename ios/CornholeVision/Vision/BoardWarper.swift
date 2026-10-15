@@ -81,6 +81,88 @@ final class BoardWarper {
         return (r / n, g / n, b / n)
     }
 
+    // MARK: - Hole search
+
+    struct HoleFit {
+        var center: CGPoint     // inches on the 24x48 map
+        var radius: Double      // inches
+        var contrast: Double    // luma levels darker than the ring around it (0 = no hole)
+    }
+
+    private var integral = [Int32](repeating: 0, count: (BoardSpec.warpWidth + 1) * (BoardSpec.warpHeight + 1))
+
+    /// Summed-area table of luma over the current warped map.
+    private func buildIntegral() {
+        let w = width, h = height, stride = w + 1
+        pixels.withUnsafeBufferPointer { px in
+            integral.withUnsafeMutableBufferPointer { ig in
+                for x in 0...w { ig[x] = 0 }
+                for y in 1...h {
+                    var row: Int32 = 0
+                    ig[y * stride] = 0
+                    for x in 1...w {
+                        let i = ((y - 1) * w + (x - 1)) * 4
+                        let luma = (Int32(px[i]) * 29 + Int32(px[i + 1]) * 150 + Int32(px[i + 2]) * 77) >> 8
+                        row += luma
+                        ig[y * stride + x] = ig[(y - 1) * stride + x] + row
+                    }
+                }
+            }
+        }
+    }
+
+    /// Mean luma of the pixel box [x0,x1) x [y0,y1) (clamped) using the integral image.
+    private func boxMean(_ x0: Int, _ y0: Int, _ x1: Int, _ y1: Int) -> (sum: Double, area: Double) {
+        let stride = width + 1
+        let ax = max(0, min(width, x0)), ay = max(0, min(height, y0))
+        let bx = max(0, min(width, x1)), by = max(0, min(height, y1))
+        if bx <= ax || by <= ay { return (0, 0) }
+        let s = Int(integral[by * stride + bx]) - Int(integral[ay * stride + bx]) - Int(integral[by * stride + ax]) + Int(integral[ay * stride + ax])
+        return (Double(s), Double((bx - ax) * (by - ay)))
+    }
+
+    /// Look for a dark, roughly round hole near the centre line of the warped board.
+    /// Regulation puts it at (12, 9) with radius 3, but makeshift boards put it anywhere,
+    /// so this searches the whole length and returns what it actually finds. The caller
+    /// decides which end is the hole end (y < 24 means the c0-c1 edge).
+    func findHole() -> HoleFit? {
+        buildIntegral()
+        let ppi = Double(BoardSpec.pixelsPerInch)
+        var best: HoleFit?
+        func evaluate(cx: Double, cy: Double, r: Double) -> Double {
+            let ri = Int((r * 0.7 * ppi).rounded()), ro = Int((r * 1.8 * ppi).rounded())
+            let px = Int((cx * ppi).rounded()), py = Int((cy * ppi).rounded())
+            let inner = boxMean(px - ri, py - ri, px + ri, py + ri)
+            let outer = boxMean(px - ro, py - ro, px + ro, py + ro)
+            guard inner.area > 0, outer.area > inner.area else { return 0 }
+            let innerMean = inner.sum / inner.area
+            let ringMean = (outer.sum - inner.sum) / (outer.area - inner.area)
+            guard innerMean < ringMean * 0.78 else { return 0 }
+            return ringMean - innerMean
+        }
+        for r in [2.5, 3.0, 3.6, 4.3] {
+            var cy = 3.5
+            while cy <= 44.5 {
+                var cx = 6.0
+                while cx <= 18 {
+                    let c = evaluate(cx: cx, cy: cy, r: r)
+                    if c > (best?.contrast ?? 0) { best = HoleFit(center: CGPoint(x: cx, y: cy), radius: r, contrast: c) }
+                    cx += 1
+                }
+                cy += 1
+            }
+        }
+        guard var fit = best, fit.contrast > 0 else { return nil }
+        // Refine to half an inch.
+        for dy in [-0.5, 0, 0.5] {
+            for dx in [-0.5, 0, 0.5] {
+                let c = evaluate(cx: fit.center.x + dx, cy: fit.center.y + dy, r: fit.radius)
+                if c > fit.contrast { fit = HoleFit(center: CGPoint(x: fit.center.x + dx, y: fit.center.y + dy), radius: fit.radius, contrast: c) }
+            }
+        }
+        return fit
+    }
+
     /// Mean luminance inside a circle (inches) — used to find which end has the hole.
     func meanLuma(centerIn c: CGPoint, innerIn: Double, outerIn: Double) -> Double {
         let ppi = Double(BoardSpec.pixelsPerInch)

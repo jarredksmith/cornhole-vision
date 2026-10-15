@@ -14,7 +14,14 @@ struct ControlsView: View {
                 pill("Undo", icon: "arrow.uturn.backward") { game.undo() }
             case .moveToOtherBoard:
                 pill("Phone is in place", icon: "checkmark", prominent: true) { game.phoneMoved() }
-            case .waitingOtherBoard, .findingBoard:
+            case .findingBoard:
+                if game.manualMode {
+                    pill("Undo tap", icon: "arrow.uturn.backward", enabled: !game.manualCorners.isEmpty) { game.undoManualCorner() }
+                    pill("Cancel", icon: "xmark") { game.cancelManualCorners() }
+                } else {
+                    pill("Tap corners", icon: "hand.tap", prominent: game.searchSeconds > 6) { game.startManualCorners() }
+                }
+            case .waitingOtherBoard:
                 pill("Undo", icon: "arrow.uturn.backward", enabled: !game.rounds.isEmpty) { game.undo() }
             case .finished:
                 pill("Undo last round", icon: "arrow.uturn.backward") { game.undo() }
@@ -39,6 +46,7 @@ struct ControlsView: View {
             }
             Menu {
                 Toggle("Debug info", isOn: $game.showDebug)
+                Button("Tap corners (set board by hand)") { game.startManualCorners() }
                 Button("New game", role: .destructive) { confirmNewGame = true }
             } label: {
                 Image(systemName: "ellipsis.circle.fill")
