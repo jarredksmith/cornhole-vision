@@ -23,7 +23,7 @@ concurrency:
 
 jobs:
   build:
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 45
     env:
       SIGNING: ${{ secrets.ASC_KEY_P8 != '' && secrets.ASC_KEY_ID != '' && secrets.ASC_ISSUER_ID != '' }}
@@ -33,9 +33,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Use the newest Xcode 16
+      - name: Use the newest Xcode
         run: |
-          XC=$(ls -d /Applications/Xcode_16*.app 2>/dev/null | sort -V | tail -1)
+          XC=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
           if [ -n "$XC" ]; then sudo xcode-select -s "$XC/Contents/Developer"; fi
           xcodebuild -version
 
