@@ -1,0 +1,497 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cornhole Live</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;900&family=Barlow:wght@400;600&display=swap">
+<style>
+  /* Layout: one-screen scoreboard. Team cards up top, the 3D board fills the middle,
+     round history runs along the bottom. Dark-first: it's watched outdoors on phones. */
+  :root {
+    --bg: #0d1410;          /* evening lawn */
+    --bg-2: #15201a;
+    --fg: #f1efe6;
+    --fg-dim: #a9b2a7;
+    --line: rgba(241, 239, 230, 0.12);
+    --wood: #d9b27a;        /* plywood */
+    --wood-deep: #9c7a4b;
+    --good: #7fd08a;
+    --warn: #e7c35a;
+    --font-display: "Barlow Condensed", "Arial Narrow", Impact, sans-serif;
+    --font-body: "Barlow", -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+    color-scheme: dark;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg: #e9e4d6; --bg-2: #f6f2e8; --fg: #1b2219; --fg-dim: #5c6659;
+      --line: rgba(27, 34, 25, 0.14); --wood: #b98f55; --wood-deep: #7d5c33;
+      --good: #2f8a45; --warn: #9a7a12; color-scheme: light;
+    }
+  }
+  :root[data-theme="light"] {
+    --bg: #e9e4d6; --bg-2: #f6f2e8; --fg: #1b2219; --fg-dim: #5c6659;
+    --line: rgba(27, 34, 25, 0.14); --wood: #b98f55; --wood-deep: #7d5c33;
+    --good: #2f8a45; --warn: #9a7a12; color-scheme: light;
+  }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg); font-family: var(--font-body);
+    display: flex; flex-direction: column; overflow: hidden;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: 10px;
+    gap: 10px;
+  }
+  header { display: grid; grid-template-columns: 1fr auto 1fr; gap: 10px; align-items: stretch; }
+  .team {
+    display: flex; align-items: center; gap: 12px; min-width: 0;
+    padding: 10px 14px; border-radius: 14px; background: var(--bg-2);
+    border: 1px solid var(--line); position: relative; overflow: hidden;
+  }
+  .team.right { flex-direction: row-reverse; text-align: right; }
+  .team .swatch { width: 14px; align-self: stretch; border-radius: 6px; flex: none; box-shadow: inset 0 0 0 1px rgba(255,255,255,.25); }
+  .team .name { font: 700 14px/1 var(--font-display); letter-spacing: .08em; text-transform: uppercase; color: var(--fg-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .team .score { font: 900 64px/1 var(--font-display); font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .team .round { font: 600 13px/1.2 var(--font-body); color: var(--fg-dim); font-variant-numeric: tabular-nums; min-height: 1.2em; }
+  .team.leading .score { color: var(--warn); }
+  .team .live-dot { position: absolute; top: 8px; width: 8px; height: 8px; border-radius: 50%; background: var(--good); opacity: 0; }
+  .team.left .live-dot { right: 10px; } .team.right .live-dot { left: 10px; }
+  .mid { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 6px 12px; min-width: 110px; }
+  .mid .label { font: 700 12px/1 var(--font-display); letter-spacing: .14em; text-transform: uppercase; color: var(--fg-dim); }
+  .mid .code { font: 900 30px/1 var(--font-display); letter-spacing: .12em; }
+  .mid .status { display: flex; align-items: center; gap: 6px; font: 600 12px/1 var(--font-body); color: var(--fg-dim); }
+  .mid .status i { width: 8px; height: 8px; border-radius: 50%; background: var(--fg-dim); display: inline-block; }
+  .mid .status.on i { background: var(--good); }
+  .mid .status.demo i { background: var(--warn); }
+  main { flex: 1; min-height: 0; position: relative; border-radius: 16px; overflow: hidden; background: var(--bg-2); border: 1px solid var(--line); }
+  canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+  .banner {
+    position: absolute; left: 50%; top: 14px; transform: translateX(-50%);
+    padding: 10px 18px; border-radius: 999px; background: color-mix(in srgb, var(--bg) 82%, transparent);
+    border: 1px solid var(--line); font: 700 16px/1 var(--font-display); letter-spacing: .06em; text-transform: uppercase;
+    white-space: nowrap; max-width: calc(100% - 32px); overflow: hidden; text-overflow: ellipsis;
+    transition: opacity .3s;
+  }
+  .banner[hidden] { display: none; }
+  .hint { position: absolute; right: 12px; bottom: 10px; font: 600 11px/1 var(--font-body); color: var(--fg-dim); letter-spacing: .04em; }
+  footer { display: flex; gap: 8px; overflow-x: auto; min-height: 34px; align-items: center; scrollbar-width: none; }
+  footer::-webkit-scrollbar { display: none; }
+  .chip { flex: none; display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg-2); font: 600 13px/1 var(--font-body); font-variant-numeric: tabular-nums; }
+  .chip b { font: 900 14px/1 var(--font-display); letter-spacing: .04em; }
+  .chip .dot { width: 10px; height: 10px; border-radius: 3px; }
+  .chip.wash { color: var(--fg-dim); }
+  .empty { color: var(--fg-dim); font: 600 13px/1 var(--font-body); }
+  button.demo { margin-left: auto; flex: none; border: 1px solid var(--line); background: var(--bg-2); color: var(--fg); border-radius: 999px; padding: 7px 12px; font: 700 12px/1 var(--font-display); letter-spacing: .1em; text-transform: uppercase; cursor: pointer; }
+  button.demo:focus-visible { outline: 2px solid var(--warn); outline-offset: 2px; }
+  @media (max-width: 560px) {
+    .team .score { font-size: 44px; }
+    .mid { min-width: 80px; padding: 4px 6px; } .mid .code { font-size: 22px; }
+    .team { padding: 8px 10px; gap: 8px; }
+  }
+  @media (prefers-reduced-motion: reduce) { .banner { transition: none; } }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="team left" id="teamA">
+    <div class="swatch" id="swA"></div>
+    <div style="min-width:0">
+      <div class="name" id="nameA">Team 1</div>
+      <div class="score" id="scoreA">0</div>
+      <div class="round" id="roundA"></div>
+    </div>
+    <i class="live-dot" id="dotA"></i>
+  </div>
+  <div class="mid">
+    <div class="label" id="roundLabel">Round 1</div>
+    <div class="code" id="code">— — — —</div>
+    <div class="status" id="status"><i></i><span id="statusText">connecting</span></div>
+  </div>
+  <div class="team right" id="teamB">
+    <div class="swatch" id="swB"></div>
+    <div style="min-width:0">
+      <div class="name" id="nameB">Team 2</div>
+      <div class="score" id="scoreB">0</div>
+      <div class="round" id="roundB"></div>
+    </div>
+    <i class="live-dot" id="dotB"></i>
+  </div>
+</header>
+
+<main>
+  <canvas id="view"></canvas>
+  <div class="banner" id="banner" hidden></div>
+  <div class="hint">drag to orbit</div>
+</main>
+
+<footer id="history"><span class="empty">No rounds yet</span><button class="demo" id="demoBtn" type="button">Demo game</button></footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.158.0/three.min.js"></script>
+<script>
+(() => {
+  // ---------------------------------------------------------------- config
+  // Set to your deployed worker (see worker/README.md). Leave as-is to run the demo.
+  const WORKER_URL = "";
+  const params = new URLSearchParams(location.search);
+  const gameCode = (params.get("game") || "").toUpperCase();
+  const forceDemo = params.get("demo") === "1" || !WORKER_URL || !gameCode;
+
+  // ---------------------------------------------------------------- state
+  let state = emptyState();
+  let demo = null;
+
+  function emptyState() {
+    return { code: gameCode || "DEMO", status: "lobby",
+      teams: [{ name: "Team 1", color: "#9E9E9E" }, { name: "Team 2", color: "#616161" }],
+      scores: [0, 0], rounds: [], roundNumber: 1, activeBoard: 1, live: null, winner: null, target: 21 };
+  }
+
+  // ---------------------------------------------------------------- DOM
+  const $ = (id) => document.getElementById(id);
+  const el = { nameA: $("nameA"), nameB: $("nameB"), scoreA: $("scoreA"), scoreB: $("scoreB"),
+    roundA: $("roundA"), roundB: $("roundB"), swA: $("swA"), swB: $("swB"), teamA: $("teamA"), teamB: $("teamB"),
+    roundLabel: $("roundLabel"), code: $("code"), status: $("status"), statusText: $("statusText"),
+    history: $("history"), banner: $("banner"), demoBtn: $("demoBtn"), dotA: $("dotA"), dotB: $("dotB") };
+
+  function setStatus(kind, text) {
+    el.status.className = "status " + kind;
+    el.statusText.textContent = text;
+  }
+
+  function render() {
+    const [a, b] = state.teams;
+    el.nameA.textContent = a.name; el.nameB.textContent = b.name;
+    el.swA.style.background = a.color; el.swB.style.background = b.color;
+    el.scoreA.textContent = state.scores[0]; el.scoreB.textContent = state.scores[1];
+    el.teamA.classList.toggle("leading", state.scores[0] > state.scores[1]);
+    el.teamB.classList.toggle("leading", state.scores[1] > state.scores[0]);
+    const live = state.live;
+    el.roundA.textContent = live && (live.a.on + live.a.in) ? `${live.a.in} in · ${live.a.on} on` : "";
+    el.roundB.textContent = live && (live.b.on + live.b.in) ? `${live.b.in} in · ${live.b.on} on` : "";
+    el.roundLabel.textContent = state.status === "finished" ? "Final" : `Round ${state.roundNumber} · Board ${state.activeBoard}`;
+    el.code.textContent = state.code.split("").join(" ");
+
+    // round history chips
+    el.history.querySelectorAll(".chip, .empty").forEach((n) => n.remove());
+    if (!state.rounds.length) {
+      const s = document.createElement("span"); s.className = "empty"; s.textContent = "No rounds yet";
+      el.history.prepend(s);
+    } else {
+      const frag = document.createDocumentFragment();
+      for (const r of state.rounds) {
+        const chip = document.createElement("span");
+        const winner = r.pointsA > 0 ? 0 : r.pointsB > 0 ? 1 : -1;
+        chip.className = "chip" + (winner < 0 ? " wash" : "");
+        if (winner >= 0) {
+          const dot = document.createElement("i"); dot.className = "dot"; dot.style.background = state.teams[winner].color;
+          chip.appendChild(dot);
+        }
+        const b = document.createElement("b"); b.textContent = `R${r.number}`;
+        chip.appendChild(b);
+        const t = document.createElement("span");
+        t.textContent = winner < 0 ? "wash" : `${state.teams[winner].name} +${Math.max(r.pointsA, r.pointsB)}`;
+        chip.appendChild(t);
+        frag.appendChild(chip);
+      }
+      el.history.insertBefore(frag, el.demoBtn);
+      el.history.scrollLeft = el.history.scrollWidth;
+    }
+
+    if (state.status === "finished" && state.winner != null) {
+      showBanner(`${state.teams[state.winner].name} wins ${state.scores[state.winner]}–${state.scores[1 - state.winner]}`, 0);
+    }
+  }
+
+  let bannerTimer = null;
+  function showBanner(text, ms) {
+    el.banner.textContent = text; el.banner.hidden = false;
+    clearTimeout(bannerTimer);
+    if (ms) bannerTimer = setTimeout(() => { el.banner.hidden = true; }, ms);
+  }
+
+  // ---------------------------------------------------------------- 3D
+  const canvas = $("view");
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(42, 1, 1, 600);
+
+  // Orbit: spherical coords around the board centre
+  const target = new THREE.Vector3(0, 8, 0);
+  let theta = 0.0, phi = 0.95, radius = 110;       // azimuth from the thrower's side, elevation, distance
+  function placeCamera() {
+    camera.position.set(target.x + radius * Math.sin(phi) * Math.sin(theta),
+                        target.y + radius * Math.cos(phi),
+                        target.z + radius * Math.sin(phi) * Math.cos(theta));
+    camera.lookAt(target);
+  }
+  placeCamera();
+
+  // lights
+  scene.add(new THREE.HemisphereLight(0xdfeeff, 0x3a4a30, 0.9));
+  const sun = new THREE.DirectionalLight(0xfff2dc, 1.4);
+  sun.position.set(40, 90, 50); sun.castShadow = true;
+  sun.shadow.mapSize.set(1024, 1024);
+  Object.assign(sun.shadow.camera, { left: -60, right: 60, top: 80, bottom: -80, near: 10, far: 250 });
+  scene.add(sun);
+
+  // procedural textures (no external images allowed)
+  function makeTexture(w, h, paint) {
+    const c = document.createElement("canvas"); c.width = w; c.height = h;
+    const g = c.getContext("2d"); paint(g, w, h);
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+  }
+  const grassTex = makeTexture(512, 512, (g, w, h) => {
+    g.fillStyle = "#3f6b2f"; g.fillRect(0, 0, w, h);
+    for (let i = 0; i < 9000; i++) {
+      g.fillStyle = `hsl(${95 + Math.random() * 25}, ${40 + Math.random() * 25}%, ${22 + Math.random() * 22}%)`;
+      g.fillRect(Math.random() * w, Math.random() * h, 2 + Math.random() * 3, 1 + Math.random() * 2);
+    }
+  });
+  grassTex.wrapS = grassTex.wrapT = THREE.RepeatWrapping; grassTex.repeat.set(6, 6);
+  const woodTex = makeTexture(256, 512, (g, w, h) => {
+    g.fillStyle = "#d8b074"; g.fillRect(0, 0, w, h);
+    for (let y = 0; y < h; y += 3) {
+      g.fillStyle = `rgba(120,80,30,${0.04 + Math.random() * 0.12})`;
+      g.fillRect(0, y + Math.sin(y * 0.05) * 3, w, 1 + Math.random() * 2);
+    }
+    for (let i = 0; i < 400; i++) {
+      g.fillStyle = `rgba(90,60,20,${Math.random() * 0.08})`;
+      g.fillRect(Math.random() * w, Math.random() * h, 1, 4 + Math.random() * 30);
+    }
+  });
+
+  // ground
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(600, 600), new THREE.MeshLambertMaterial({ map: grassTex }));
+  ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
+
+  // board: 24 x 48 in, 6 in hole centred 9 in from the back edge, back 12 in high, front 4 in.
+  const W = 24, L = 48, HOLE_R = 3, HOLE_Y = 9, THICK = 0.75;
+  const tilt = Math.atan2(12 - 4, L);
+  const board = new THREE.Group();
+  board.position.y = 8;
+  board.rotation.x = tilt;
+  scene.add(board);
+
+  const shape = new THREE.Shape();
+  shape.moveTo(-W / 2, -L / 2); shape.lineTo(W / 2, -L / 2); shape.lineTo(W / 2, L / 2); shape.lineTo(-W / 2, L / 2); shape.closePath();
+  const holePath = new THREE.Path();
+  holePath.absarc(0, -L / 2 + HOLE_Y, HOLE_R, 0, Math.PI * 2, true);
+  shape.holes.push(holePath);
+  const deckGeo = new THREE.ExtrudeGeometry(shape, { depth: THICK, bevelEnabled: false });
+  deckGeo.rotateX(Math.PI / 2);                  // shape (x,y) -> (x,z); extrusion runs -Y so the top surface is y = 0
+  const deck = new THREE.Mesh(deckGeo, new THREE.MeshStandardMaterial({ map: woodTex, roughness: 0.6, metalness: 0.05 }));
+  deck.castShadow = true; deck.receiveShadow = true;
+  board.add(deck);
+  // dark cavity under the hole so it reads as a hole from every angle
+  const cavity = new THREE.Mesh(new THREE.CylinderGeometry(HOLE_R, HOLE_R, 14, 32, 1, true),
+    new THREE.MeshBasicMaterial({ color: 0x060806, side: THREE.BackSide }));
+  cavity.position.set(0, -7 - THICK, -L / 2 + HOLE_Y);
+  board.add(cavity);
+  // legs
+  const legMat = new THREE.MeshStandardMaterial({ color: 0x9c7a4b, roughness: 0.8 });
+  for (const sx of [-1, 1]) {
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(1.5, 11, 3.5), legMat);
+    leg.position.set(sx * (W / 2 - 1.5), -5.5 - THICK, -L / 2 + 3); leg.castShadow = true;
+    board.add(leg);
+  }
+
+  // Convert board inches (x 0..24, y 0..48 with y=0 at the hole end) to local board coords.
+  const toLocal = (x, y) => new THREE.Vector3(x - W / 2, 0, y - L / 2);
+
+  // bags
+  const bagGeo = new THREE.BoxGeometry(6, 1.3, 6, 2, 1, 2);
+  const bags = new Map();   // id -> { mesh, target, state, stack }
+  function bagFor(b) {
+    let entry = bags.get(b.id);
+    if (!entry) {
+      const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color(state.teams[b.team]?.color || "#999"), roughness: 0.95, transparent: true });
+      const mesh = new THREE.Mesh(bagGeo, mat);
+      mesh.castShadow = true; mesh.receiveShadow = true;
+      mesh.rotation.y = (Math.random() - 0.5) * 0.9;
+      mesh.position.copy(toLocal(b.x, b.y)); mesh.position.y = 0.65;
+      board.add(mesh);
+      entry = { mesh, state: b.state, t: 0, lift: 0 };
+      bags.set(b.id, entry);
+    }
+    entry.mesh.material.color.set(state.teams[b.team]?.color || "#999");
+    return entry;
+  }
+
+  function syncBags() {
+    const live = state.live;
+    const seen = new Set();
+    const list = live ? live.bags : [];
+    // stacking: a later bag resting within 4 in of an earlier one sits on top of it
+    const placed = [];
+    for (const b of list) {
+      seen.add(b.id);
+      const e = bagFor(b);
+      let lift = 0;
+      if (b.state !== "inHole" && b.state !== "off") {
+        for (const p of placed) if (Math.hypot(p.x - b.x, p.y - b.y) < 4) lift = Math.max(lift, p.lift + 1.3);
+        placed.push({ x: b.x, y: b.y, lift });
+      }
+      e.target = toLocal(b.x, b.y); e.target.y = 0.65 + lift;
+      e.state = b.state;
+    }
+    for (const [id, e] of bags) if (!seen.has(id)) { board.remove(e.mesh); e.mesh.material.dispose(); bags.delete(id); }
+  }
+
+  function animateBags(dt) {
+    for (const e of bags.values()) {
+      const m = e.mesh;
+      if (!e.target) continue;
+      const k = 1 - Math.pow(0.001, dt);          // smooth follow
+      if (e.state === "inHole") {
+        // sink through the hole
+        const hole = toLocal(12, HOLE_Y); hole.y = -6;
+        m.position.lerp(hole, k * 0.8);
+        m.scale.lerp(new THREE.Vector3(0.75, 0.75, 0.75), k);
+        m.material.opacity += (0 - m.material.opacity) * k * 0.6;
+      } else if (e.state === "off") {
+        // slide off the nearest edge and drop
+        const t = e.target.clone();
+        const dx = Math.abs(t.x) > 6 ? Math.sign(t.x) * 20 : 0;
+        const dz = dx === 0 ? Math.sign(t.z || 1) * 32 : t.z;
+        t.set(t.x + dx, -8, dz);
+        m.position.lerp(t, k * 0.5);
+        m.material.opacity += (0.25 - m.material.opacity) * k;
+      } else {
+        m.position.lerp(e.target, k);
+        m.material.opacity += (1 - m.material.opacity) * k;
+        m.scale.lerp(new THREE.Vector3(1, 1, 1), k);
+      }
+    }
+  }
+
+  // resize / render loop
+  function resize() {
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    if (canvas.width !== Math.floor(w * renderer.getPixelRatio()) || canvas.height !== Math.floor(h * renderer.getPixelRatio())) {
+      renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+    }
+  }
+  let last = performance.now();
+  function loop(now) {
+    const dt = Math.min(0.1, (now - last) / 1000); last = now;
+    resize(); animateBags(dt); if (demo) demo.tick(dt);
+    renderer.render(scene, camera);
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+  // orbit (drag) + wheel zoom
+  let dragging = false, lx = 0, ly = 0;
+  canvas.addEventListener("pointerdown", (e) => { dragging = true; lx = e.clientX; ly = e.clientY; canvas.setPointerCapture(e.pointerId); });
+  canvas.addEventListener("pointermove", (e) => {
+    if (!dragging) return;
+    theta -= (e.clientX - lx) * 0.006; phi = Math.min(1.45, Math.max(0.25, phi - (e.clientY - ly) * 0.005));
+    lx = e.clientX; ly = e.clientY; placeCamera();
+  });
+  canvas.addEventListener("pointerup", () => { dragging = false; });
+  canvas.addEventListener("pointercancel", () => { dragging = false; });
+  canvas.addEventListener("wheel", (e) => { e.preventDefault(); radius = Math.min(220, Math.max(60, radius + e.deltaY * 0.1)); placeCamera(); }, { passive: false });
+
+  // ---------------------------------------------------------------- live connection
+  function connect() {
+    const base = WORKER_URL.replace(/^http/, "ws").replace(/\/$/, "");
+    let ws;
+    try { ws = new WebSocket(`${base}/ws/${gameCode}?role=viewer`); } catch { return startDemo(); }
+    setStatus("", "connecting");
+    ws.onopen = () => setStatus("on", "live");
+    ws.onmessage = (ev) => {
+      try {
+        const msg = JSON.parse(ev.data);
+        if (msg.type === "state" && msg.state) applyState(msg.state);
+      } catch {}
+    };
+    ws.onclose = () => { setStatus("", "reconnecting"); setTimeout(connect, 2000); };
+    ws.onerror = () => { try { ws.close(); } catch {} };
+  }
+
+  function applyState(s) {
+    const prevRounds = state.rounds.length;
+    state = s;
+    syncBags(); render();
+    if (s.rounds.length > prevRounds) {
+      const r = s.rounds[s.rounds.length - 1];
+      const w = r.pointsA > 0 ? 0 : r.pointsB > 0 ? 1 : -1;
+      showBanner(w < 0 ? `Round ${r.number}: wash` : `Round ${r.number}: ${s.teams[w].name} +${Math.max(r.pointsA, r.pointsB)}`, 3500);
+    }
+    el.dotA.style.opacity = el.dotB.style.opacity = s.status === "playing" ? 1 : 0;
+  }
+
+  // ---------------------------------------------------------------- demo game (no backend needed)
+  function startDemo() {
+    setStatus("demo", "demo");
+    el.demoBtn.textContent = "Restart demo";
+    const teams = [{ name: "Red", color: "#C8232A" }, { name: "Blue", color: "#2F5FD0" }];
+    const s = Object.assign(emptyState(), { code: "DEMO", status: "playing", teams, live: { board: 1, bags: [], a: { on: 0, in: 0 }, b: { on: 0, in: 0 } } });
+    let nextId = 1, throwsThisRound = 0, timer = 0, phase = "throw", flying = null;
+    applyState(s);
+
+    function counts() {
+      const c = [{ on: 0, in: 0 }, { on: 0, in: 0 }];
+      for (const b of s.live.bags) { if (b.state === "resting") c[b.team].on++; if (b.state === "inHole") c[b.team].in++; }
+      return c;
+    }
+    demo = {
+      tick(dt) {
+        timer -= dt;
+        if (flying) {
+          // slide from the front edge toward its landing spot
+          flying.p = Math.min(1, flying.p + dt * 1.6);
+          const e = 1 - Math.pow(1 - flying.p, 3);
+          flying.bag.x = flying.from.x + (flying.to.x - flying.from.x) * e;
+          flying.bag.y = flying.from.y + (flying.to.y - flying.from.y) * e;
+          if (flying.p >= 1) {
+            flying.bag.state = flying.end;
+            if (flying.end === "off") { /* stays as a faded bag for the round */ }
+            flying = null; timer = 0.9;
+            const c = counts(); s.live.a = c[0]; s.live.b = c[1];
+          }
+          applyState(s); return;
+        }
+        if (timer > 0) return;
+        if (phase === "throw") {
+          const team = throwsThisRound % 2;
+          const roll = Math.random();
+          const end = roll < 0.22 ? "inHole" : roll < 0.78 ? "resting" : "off";
+          const to = end === "inHole" ? { x: 12 + (Math.random() - .5) * 2, y: 9 + (Math.random() - .5) * 2 }
+            : end === "off" ? { x: Math.random() < .5 ? -2 : 26, y: 10 + Math.random() * 30 }
+            : { x: 4 + Math.random() * 16, y: 6 + Math.random() * 36 };
+          const bag = { id: nextId++, team, x: 12 + (Math.random() - .5) * 10, y: 52, state: "moving" };
+          s.live.bags.push(bag);
+          flying = { bag, from: { x: bag.x, y: bag.y }, to, p: 0, end };
+          throwsThisRound++;
+          if (throwsThisRound >= 8) phase = "score";
+        } else if (phase === "score") {
+          const c = counts();
+          const pa = c[0].on + 3 * c[0].in, pb = c[1].on + 3 * c[1].in;
+          const diff = pa - pb;
+          const r = { number: s.rounds.length + 1, board: s.activeBoard, a: c[0], b: c[1], pointsA: Math.max(0, diff), pointsB: Math.max(0, -diff) };
+          s.rounds.push(r); s.scores = [s.scores[0] + r.pointsA, s.scores[1] + r.pointsB];
+          s.roundNumber = s.rounds.length + 1; s.activeBoard = s.activeBoard === 1 ? 2 : 1;
+          if (s.scores[0] >= 21 && s.scores[0] > s.scores[1]) { s.status = "finished"; s.winner = 0; }
+          else if (s.scores[1] >= 21 && s.scores[1] > s.scores[0]) { s.status = "finished"; s.winner = 1; }
+          applyState(s);
+          phase = s.status === "finished" ? "done" : "clear"; timer = 3.5;
+        } else if (phase === "clear") {
+          s.live = { board: s.activeBoard, bags: [], a: { on: 0, in: 0 }, b: { on: 0, in: 0 } };
+          throwsThisRound = 0; phase = "throw"; timer = 1.2; applyState(s);
+        }
+      }
+    };
+  }
+
+  el.demoBtn.addEventListener("click", () => { demo = null; el.banner.hidden = true; startDemo(); });
+  if (forceDemo) startDemo(); else connect();
+})();
+</script>
+</body>
+</html>

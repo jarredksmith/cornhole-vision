@@ -1,0 +1,15 @@
+# training artifacts
+training/dataset*/
+training/runs/
+training/*.pt
+training/.venv/
+__pycache__/
+# xcode
+ios/*.xcodeproj
+ios/DerivedData/
+ios/build/
+*.xcuserstate
+# node
+worker/node_modules/
+worker/.wrangler/
+.DS_Store
