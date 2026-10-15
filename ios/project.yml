@@ -11,7 +11,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.9"
-    MARKETING_VERSION: "0.1.0"
+    MARKETING_VERSION: "1.0"
     CURRENT_PROJECT_VERSION: "1"
     CODE_SIGN_STYLE: Automatic
     DEVELOPMENT_TEAM: SVYYTM3LTN
@@ -33,6 +33,8 @@ targets:
       path: CornholeVision/Info.plist
       properties:
         CFBundleDisplayName: Cornhole Vision
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         ITSAppUsesNonExemptEncryption: false
         NSCameraUsageDescription: Cornhole Vision watches the board to score the game automatically.
         NSMotionUsageDescription: Used to notice when the phone is picked up and moved to the other board.

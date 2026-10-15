@@ -13,7 +13,16 @@ web/        Follow page: scoreboard + Three.js 3D board, demo mode built in
 training/   Synthetic data generator, YOLO training, Core ML export, real-data downloader
 ```
 
-## 1. Run the app (10 minutes)
+## 0. TestFlight (what's actually set up)
+
+GitHub builds and ships this app; no Mac needed. Every push that touches `ios/`
+runs `.github/workflows/ios.yml` on a macOS runner (Xcode 26), signs it with
+cloud-managed signing via the App Store Connect API key in the repo secrets
+(`ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8`), and uploads to TestFlight.
+App Store Connect app: **Cornhole Vision**, bundle ID `com.jarredsmith.cornholevision`,
+internal test group **Backyard**. Build numbers follow the GitHub run number.
+
+## 1. Run the app from Xcode instead (10 minutes)
 
 ```bash
 brew install xcodegen
