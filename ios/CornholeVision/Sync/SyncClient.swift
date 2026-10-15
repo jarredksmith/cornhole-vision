@@ -98,7 +98,7 @@ final class SyncClient: NSObject, URLSessionWebSocketDelegate {
 
     // MARK: URLSessionWebSocketDelegate
 
-    func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol protocol: String?) {
+    func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol proto: String?) {
         reconnectDelay = 1
         set(.connected)
         send(OutboundMessage(type: "hello", role: role, board: board, name: UIDevice.current.name))

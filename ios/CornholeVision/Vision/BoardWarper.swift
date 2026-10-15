@@ -68,8 +68,8 @@ final class BoardWarper {
 
     /// Average colour (r, g, b in 0...255) of a small patch around a board-inch position.
     func sampleColor(atInches p: CGPoint, radiusPx: Int = 3) -> (r: Double, g: Double, b: Double) {
-        let cx = Int(p.x * Double(BoardSpec.pixelsPerInch))
-        let cy = Int(p.y * Double(BoardSpec.pixelsPerInch))
+        let cx = min(width - 1, max(0, Int(p.x * Double(BoardSpec.pixelsPerInch))))
+        let cy = min(height - 1, max(0, Int(p.y * Double(BoardSpec.pixelsPerInch))))
         var r = 0.0, g = 0.0, b = 0.0, n = 0.0
         for y in max(0, cy - radiusPx)...min(height - 1, cy + radiusPx) {
             for x in max(0, cx - radiusPx)...min(width - 1, cx + radiusPx) {

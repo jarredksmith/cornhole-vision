@@ -14,7 +14,8 @@ struct CameraPreviewView: UIViewRepresentable {
         let view = PreviewUIView()
         view.backgroundColor = .black
         camera.attachPreview(layer: view.previewLayer)
-        onLayer(view.previewLayer)
+        let layer = view.previewLayer
+        MainActor.assumeIsolated { onLayer(layer) }
         return view
     }
 

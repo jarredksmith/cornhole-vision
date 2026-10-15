@@ -25,6 +25,10 @@ targets:
         excludes:
           - "**/.DS_Store"
           - "**/*.md"
+          - "Models/**"
+      - path: CornholeVision/Models/BagDetector.mlpackage
+        type: file
+        buildPhase: sources
     info:
       path: CornholeVision/Info.plist
       properties:
