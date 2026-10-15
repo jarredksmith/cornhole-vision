@@ -133,12 +133,23 @@ final class BoardWarper {
             let ri = Int((r * 0.7 * ppi).rounded()), ro = Int((r * 1.8 * ppi).rounded())
             let px = Int((cx * ppi).rounded()), py = Int((cy * ppi).rounded())
             let inner = boxMean(px - ri, py - ri, px + ri, py + ri)
-            let outer = boxMean(px - ro, py - ro, px + ro, py + ro)
-            guard inner.area > 0, outer.area > inner.area else { return 0 }
+            guard inner.area > 0 else { return 0 }
             let innerMean = inner.sum / inner.area
-            let ringMean = (outer.sum - inner.sum) / (outer.area - inner.area)
-            guard innerMean < ringMean * 0.78 else { return 0 }
-            return ringMean - innerMean
+            // A real hole is surrounded by board on every side. A shadow line, a gap or an
+            // edge is dark on one side only, so each of the four side boxes must be brighter.
+            let sides = [
+                boxMean(px - ro, py - ri, px - ri, py + ri),   // left
+                boxMean(px + ri, py - ri, px + ro, py + ri),   // right
+                boxMean(px - ri, py - ro, px + ri, py - ri),   // above
+                boxMean(px - ri, py + ri, px + ri, py + ro),   // below
+            ]
+            var minSide = Double.infinity
+            for sd in sides {
+                guard sd.area > 0 else { return 0 }
+                minSide = min(minSide, sd.sum / sd.area)
+            }
+            guard innerMean < minSide * 0.62 else { return 0 }
+            return minSide - innerMean
         }
         for r in [2.5, 3.0, 3.6, 4.3] {
             var cy = 3.5
@@ -153,6 +164,9 @@ final class BoardWarper {
             }
         }
         guard var fit = best, fit.contrast > 0 else { return nil }
+        // The playing surface should be fairly even in tone (plywood, paint, cardboard).
+        // Pillows, clothes and clutter are not. Scale the contrast by surface evenness.
+        fit.contrast *= surfaceEvenness(excluding: fit)
         // Refine to half an inch.
         for dy in [-0.5, 0, 0.5] {
             for dx in [-0.5, 0, 0.5] {
@@ -161,6 +175,30 @@ final class BoardWarper {
             }
         }
         return fit
+    }
+
+    /// 0...1: how even the board surface is, from the spread of 4x4-inch block means.
+    private func surfaceEvenness(excluding hole: HoleFit) -> Double {
+        let ppi = Double(BoardSpec.pixelsPerInch)
+        var means: [Double] = []
+        var by = 1.0
+        while by + 4 <= BoardSpec.lengthIn - 1 {
+            var bx = 1.0
+            while bx + 4 <= BoardSpec.widthIn - 1 {
+                let cx = bx + 2, cy = by + 2
+                if hypot(cx - hole.center.x, cy - hole.center.y) > hole.radius + 3.5 {
+                    let m = boxMean(Int(bx * ppi), Int(by * ppi), Int((bx + 4) * ppi), Int((by + 4) * ppi))
+                    if m.area > 0 { means.append(m.sum / m.area) }
+                }
+                bx += 4
+            }
+            by += 4
+        }
+        guard means.count > 6 else { return 1 }
+        let avg = means.reduce(0, +) / Double(means.count)
+        let mad = means.reduce(0) { $0 + abs($1 - avg) } / Double(means.count)
+        // mad ~5-15 on a board, 30-60 on a pile of laundry.
+        return max(0.15, min(1, 1.3 - mad / 40))
     }
 
     /// Mean luminance inside a circle (inches) — used to find which end has the hole.

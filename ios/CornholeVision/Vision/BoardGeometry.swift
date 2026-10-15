@@ -121,6 +121,21 @@ enum Geometry {
         return s / 4
     }
 
+    /// Point-in-polygon (ray casting).
+    static func contains(_ poly: [CGPoint], _ p: CGPoint) -> Bool {
+        var inside = false
+        var j = poly.count - 1
+        for i in 0..<poly.count {
+            let a = poly[i], b = poly[j]
+            if (a.y > p.y) != (b.y > p.y) {
+                let x = a.x + (p.y - a.y) / (b.y - a.y) * (b.x - a.x)
+                if p.x < x { inside.toggle() }
+            }
+            j = i
+        }
+        return inside
+    }
+
     static func average(_ quads: [[CGPoint]]) -> [CGPoint] {
         guard let first = quads.first else { return [] }
         var out = first

@@ -73,17 +73,19 @@ final class BoardCalibrator {
 
     /// Feed one frame's candidates. `mlHole` is the Core ML hole-box centre (vnorm) if any.
     /// Returns a lock once a hypothesis has enough evidence.
-    func update(candidates: [BoardDetector.Candidate], mlHole: CGPoint?, pixelBuffer: CVPixelBuffer, warper: BoardWarper) -> BoardLock? {
+    func update(candidates: [BoardDetector.Candidate], mlHole: (point: CGPoint, confidence: Float)?, pixelBuffer: CVPixelBuffer, warper: BoardWarper) -> BoardLock? {
         frame += 1
         var seen = Set<Int>()
 
         // Biggest few rectangles only; the board is never a small one when the phone is set up right.
-        let pool = candidates.filter { $0.area > 0.02 }.sorted { $0.area > $1.area }.prefix(6)
+        let pool = candidates.filter { $0.area > 0.05 }.sorted { $0.area > $1.area }.prefix(6)
 
         for cand in pool {
+            // When the model is confident about where the hole is, the board must contain it.
+            if let ml = mlHole, ml.confidence >= 0.45, !Geometry.contains(cand.polygon, ml.point) { continue }
             guard var (quad, hole) = bestOrientation(polygon: cand.polygon, pixelBuffer: pixelBuffer, warper: warper) else { continue }
             var s = hole.contrast * sqrt(max(cand.area, 1e-4)) * Double(0.5 + cand.confidence)
-            if let ml = mlHole, let h = Homography(from: BoardSpec.cornersIn, to: quad) {
+            if let (ml, mlConf) = mlHole, let h = Homography(from: BoardSpec.cornersIn, to: quad) {
                 // Where does the measured hole land in the image? Agreeing with the ML hole is strong evidence.
                 var d = Geometry.distance(h.apply(hole.center), ml)
                 if d >= mlHoleBonusRadius {
@@ -100,6 +102,7 @@ final class BoardCalibrator {
                         }
                     }
                 }
+                if d >= mlHoleBonusRadius && mlConf >= 0.45 { continue }   // confident hole elsewhere: not the board
                 s *= d < mlHoleBonusRadius ? 2.5 : 0.6
             }
             if let i = hypotheses.firstIndex(where: { Geometry.quadDrift($0.quad, quad) < matchDrift }) {

@@ -41,7 +41,7 @@ final class VisionPipeline {
     private var mode: Mode = .idle
     private var lock: BoardLock?
     private var pendingManualCorners: [CGPoint]?
-    private var lastMLHole: (point: CGPoint, frame: Int)?
+    private var lastMLHole: (point: CGPoint, confidence: Float, frame: Int)?
     private var frameIndex = 0
     private var emptyFrames = 0
     private var driftFrames = 0
@@ -139,17 +139,17 @@ final class VisionPipeline {
         if useML, let ml = mlDetector, frameIndex % 4 == 0 {
             let holes = ml.detect(pb).filter { $0.label == "hole" }
             if let h = holes.max(by: { $0.confidence < $1.confidence }) {
-                lastMLHole = (CGPoint(x: h.box.midX, y: h.box.midY), frameIndex)
+                lastMLHole = (CGPoint(x: h.box.midX, y: h.box.midY), h.confidence, frameIndex)
             }
         }
-        let mlHole = lastMLHole.flatMap { frameIndex - $0.frame < 30 ? $0.point : nil }
+        let mlHole: (point: CGPoint, confidence: Float)? = lastMLHole.flatMap { frameIndex - $0.frame < 30 ? ($0.point, $0.confidence) : nil }
 
         let candidates = detector.detect(in: pb)
         if let lock = calibrator.update(candidates: candidates, mlHole: mlHole, pixelBuffer: pb, warper: warper) {
             finishLock(lock, pb)
             return
         }
-        emit(.searching(polygon: calibrator.leading?.quad, hole: mlHole, candidates: candidates.count))
+        emit(.searching(polygon: calibrator.leading?.quad, hole: mlHole?.point, candidates: candidates.count))
     }
 
     private func finishLock(_ lock: BoardLock, _ pb: CVPixelBuffer) {
