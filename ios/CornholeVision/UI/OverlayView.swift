@@ -7,19 +7,28 @@ struct OverlayView: View {
     @EnvironmentObject var game: GameViewModel
 
     var body: some View {
-        GeometryReader { _ in
+        // Snapshot the view-model state on the main actor; the Canvas renderer and the
+        // local helpers below are nonisolated.
+        let previewLayer = game.previewLayer
+        let boardToImage = game.boardToImage
+        let candidatePolygon = game.candidatePolygon
+        let boardQuad = game.boardQuad
+        let liveTracks = game.liveTracks
+        let overrides = game.overrides
+        let teams = game.teams
+        return GeometryReader { _ in
             Canvas { ctx, _ in
-                guard let layer = game.previewLayer else { return }
+                guard let layer = previewLayer else { return }
                 func pt(_ vnorm: CGPoint) -> CGPoint {
                     layer.layerPointConverted(fromCaptureDevicePoint: CGPoint(x: vnorm.x, y: 1 - vnorm.y))
                 }
                 func boardPt(_ inches: CGPoint) -> CGPoint? {
-                    guard let h = game.boardToImage else { return nil }
+                    guard let h = boardToImage else { return nil }
                     return pt(h.apply(inches))
                 }
 
                 // Candidate rectangle while locking
-                if let poly = game.candidatePolygon, game.boardQuad == nil {
+                if let poly = candidatePolygon, boardQuad == nil {
                     var path = Path()
                     path.move(to: pt(poly[0]))
                     for p in poly.dropFirst() { path.addLine(to: pt(p)) }
@@ -28,7 +37,7 @@ struct OverlayView: View {
                 }
 
                 // Locked board + hole
-                if let quad = game.boardQuad {
+                if let quad = boardQuad {
                     var path = Path()
                     path.move(to: pt(quad[0]))
                     for p in quad.dropFirst() { path.addLine(to: pt(p)) }
@@ -49,10 +58,10 @@ struct OverlayView: View {
                 }
 
                 // Bags
-                for t in game.liveTracks {
+                for t in liveTracks {
                     guard let c = boardPt(t.position) else { continue }
-                    let state = game.overrides[t.id] ?? t.state
-                    let color = Color(hex: game.teams[min(t.team, 1)].color)
+                    let state = overrides[t.id] ?? t.state
+                    let color = Color(hex: teams[min(t.team, 1)].color)
                     let r: CGFloat = 16
                     let rect = CGRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r)
                     switch state {
@@ -70,7 +79,7 @@ struct OverlayView: View {
                     case .moving, .lost:
                         ctx.stroke(Path(ellipseIn: rect.insetBy(dx: 4, dy: 4)), with: .color(color.opacity(0.7)), lineWidth: 2)
                     }
-                    if game.overrides[t.id] != nil {
+                    if overrides[t.id] != nil {
                         ctx.draw(Text("✎").font(.system(size: 12)).foregroundStyle(.yellow), at: CGPoint(x: c.x + r, y: c.y - r))
                     }
                 }
@@ -82,7 +91,7 @@ struct OverlayView: View {
         }
     }
 
-    private func tap(at location: CGPoint) {
+    @MainActor private func tap(at location: CGPoint) {
         guard let layer = game.previewLayer, let h = game.boardToImage else { return }
         var best: Int?
         var bestD = 40.0

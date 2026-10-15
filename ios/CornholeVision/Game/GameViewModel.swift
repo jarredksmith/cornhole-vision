@@ -349,8 +349,8 @@ final class GameViewModel: ObservableObject {
     private func pushLive(force: Bool = false) {
         guard sync.isEnabled else { return }
         let bags = liveTracks.map { t in
-            LiveBag(id: t.id, team: t.team, x: (t.position.x * 10).rounded() / 10,
-                    y: (t.position.y * 10).rounded() / 10, state: effectiveState(t).rawValue)
+            LiveBag(id: t.id, team: t.team, x: (Double(t.position.x) * 10).rounded() / 10,
+                    y: (Double(t.position.y) * 10).rounded() / 10, state: effectiveState(t).rawValue)
         }
         let live = LiveState(board: myBoard, bags: bags, a: roundA, b: roundB)
         if force || live != lastLiveSent {
