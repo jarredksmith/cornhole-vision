@@ -26,6 +26,21 @@ struct ContentView: View {
                     .padding(.bottom, 10)
             }
 
+            if game.showDebug, let map = game.debugMap {
+                VStack {
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        Image(decorative: map, scale: 1, orientation: .up)
+                            .resizable()
+                            .interpolation(.none)
+                            .frame(width: 110, height: 220)
+                            .border(.white.opacity(0.6))
+                            .padding(.trailing, 12).padding(.bottom, 70)
+                    }
+                }
+            }
+
             if game.phase == .cameraDenied {
                 deniedView
             }

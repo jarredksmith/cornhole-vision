@@ -107,12 +107,15 @@ final class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         }
     }
 
-    /// Once the board is locked we freeze focus so bags flying past don't trigger hunting.
+    /// Once the board is locked we freeze focus, exposure and white balance: the background
+    /// model compares colours against a reference, so the camera must stop re-deciding them.
     func lockFocus() {
         guard let device else { return }
         do {
             try device.lockForConfiguration()
             if device.isFocusModeSupported(.locked) { device.focusMode = .locked }
+            if device.isExposureModeSupported(.locked) { device.exposureMode = .locked }
+            if device.isWhiteBalanceModeSupported(.locked) { device.whiteBalanceMode = .locked }
             device.unlockForConfiguration()
         } catch {}
     }
@@ -122,6 +125,8 @@ final class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         do {
             try device.lockForConfiguration()
             if device.isFocusModeSupported(.continuousAutoFocus) { device.focusMode = .continuousAutoFocus }
+            if device.isExposureModeSupported(.continuousAutoExposure) { device.exposureMode = .continuousAutoExposure }
+            if device.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) { device.whiteBalanceMode = .continuousAutoWhiteBalance }
             device.unlockForConfiguration()
         } catch {}
     }

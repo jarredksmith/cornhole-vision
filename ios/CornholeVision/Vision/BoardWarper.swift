@@ -1,3 +1,4 @@
+import Foundation
 import CoreImage
 import CoreVideo
 import CoreGraphics
@@ -79,6 +80,26 @@ final class BoardWarper {
         }
         if n == 0 { return (0, 0, 0) }
         return (r / n, g / n, b / n)
+    }
+
+    // MARK: - Debug picture
+
+    /// The warped board with changed pixels tinted red.
+    func debugImage(mask: [UInt8]) -> CGImage? {
+        var out = [UInt8](repeating: 0, count: width * height * 4)
+        for i in 0..<(width * height) {
+            let p = i * 4
+            var b = pixels[p], g = pixels[p + 1], r = pixels[p + 2]
+            if i < mask.count, mask[i] == 1 {
+                r = UInt8(min(255, Int(r) / 2 + 128)); g = g / 2; b = b / 2
+            }
+            out[p] = b; out[p + 1] = g; out[p + 2] = r; out[p + 3] = 255
+        }
+        let cs = CGColorSpaceCreateDeviceRGB()
+        let info = CGBitmapInfo(rawValue: CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.noneSkipFirst.rawValue)
+        guard let provider = CGDataProvider(data: Data(out) as CFData) else { return nil }
+        return CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: width * 4,
+                       space: cs, bitmapInfo: info, provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
     }
 
     // MARK: - Hole search

@@ -16,6 +16,7 @@ final class VisionPipeline {
         case locked(BoardLock, modelLoaded: Bool)
         case frame(FrameReport)
         case boardMoved                                        // locked board drifted; re-calibrating
+        case debugMap(CGImage)                                 // what the colour detector sees (debug)
     }
 
     struct FrameReport {
@@ -51,6 +52,8 @@ final class VisionPipeline {
 
     /// Use the Core ML model when it is bundled (true) or colour-only (false).
     var useML = true
+    /// Emit a picture of the warped board + foreground mask a few times a second.
+    var debugImages = false
 
     // MARK: - Control (callable from any thread)
 
@@ -159,6 +162,8 @@ final class VisionPipeline {
         tracker.reset()
         tracker.holeCenter = lock.hole.center
         tracker.holeRadius = lock.hole.radius
+        colorDetector.holeCenter = lock.hole.center
+        colorDetector.holeRadius = lock.hole.radius
         emptyFrames = 0
         driftFrames = 0
         mode = .tracking
@@ -173,27 +178,22 @@ final class VisionPipeline {
         let quiet = !tracker.anyMoving
         var detections = colorDetector.detect(warper.pixels, learnBackground: quiet)
 
-        // Optional Core ML detector on the full frame, mapped into board inches.
+        // The Core ML model corroborates: it labels colour blobs (bag vs bag-in-hole) and can
+        // add a bag hanging in the hole. It never spawns a bag on its own — on real boards it
+        // mistakes printed logos and tape for bags.
         if useML, let ml = mlDetector, frameIndex % 2 == 0 {
-            let obs = ml.detect(pb)
-            var mlDets: [BagDetection] = []
-            for o in obs where o.label == "bag" || o.label == "bag_in_hole" {
+            let obs = ml.detect(pb).filter { ($0.label == "bag" || $0.label == "bag_in_hole") && $0.confidence >= 0.5 }
+            for o in obs {
                 let center = CGPoint(x: o.box.midX, y: o.box.midY)
                 let inches = lock.imageToBoard.apply(center)
                 guard BoardSpec.isInsideBoard(inches, margin: 1.5) else { continue }
-                let c = warper.sampleColor(atInches: inches)
-                // Approximate area from the box size projected onto the board.
-                let corner = lock.imageToBoard.apply(CGPoint(x: o.box.minX, y: o.box.minY))
-                let corner2 = lock.imageToBoard.apply(CGPoint(x: o.box.maxX, y: o.box.maxY))
-                let area = min(60, abs(Double(corner2.x - corner.x) * Double(corner2.y - corner.y)))
-                mlDets.append(BagDetection(position: inches, areaIn2: area, r: c.r, g: c.g, b: c.b,
-                                           inHoleHint: o.label == "bag_in_hole", source: .ml))
-            }
-            // Merge: ML detections replace colour blobs within 3 in; unmatched colour blobs stay.
-            if !mlDets.isEmpty {
-                detections = detections.filter { cd in
-                    !mlDets.contains { Geometry.distance($0.position, cd.position) < 3.0 }
-                } + mlDets
+                if let i = detections.indices.first(where: { Geometry.distance(detections[$0].position, inches) < 3.5 }) {
+                    if o.label == "bag_in_hole" { detections[i].inHoleHint = true }
+                } else if o.label == "bag_in_hole", o.confidence >= 0.6,
+                          Double(hypot(inches.x - lock.hole.center.x, inches.y - lock.hole.center.y)) < lock.hole.radius + 3 {
+                    let c = warper.sampleColor(atInches: inches)
+                    detections.append(BagDetection(position: inches, areaIn2: 12, r: c.r, g: c.g, b: c.b, inHoleHint: true, source: .ml))
+                }
             }
         }
 
@@ -230,6 +230,10 @@ final class VisionPipeline {
         let report = FrameReport(tracks: tracker.confirmed, teams: teamModel.teams, anyMoving: tracker.anyMoving,
                                  boardEmpty: emptyFrames >= 30, fps: fps, detectionCount: detections.count)
         emit(.frame(report))
+
+        if debugImages, frameIndex % 6 == 0, let img = warper.debugImage(mask: colorDetector.lastMask) {
+            emit(.debugMap(img))
+        }
     }
 
     /// Smallest corner drift over the four cyclic orderings (we don't care which corner is which here).

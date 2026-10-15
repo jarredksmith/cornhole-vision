@@ -46,7 +46,9 @@ final class GameViewModel: ObservableObject {
     @Published var modelLoaded = false
     @Published var detectionCount = 0
     @Published var lastMessage = ""
-    @Published var showDebug = false
+    @Published var showDebug = false { didSet { pipeline.debugImages = showDebug; if !showDebug { debugMap = nil } } }
+    @Published var debugMap: CGImage? = nil
+    @Published var foregroundFraction = 0.0
 
     // MARK: Services
     let camera = CameraManager()
@@ -297,6 +299,8 @@ final class GameViewModel: ObservableObject {
             if phase == .ready && !roundActive { phase = .findingBoard }
         case .frame(let report):
             handleFrame(report)
+        case .debugMap(let img):
+            debugMap = img
         }
     }
 
